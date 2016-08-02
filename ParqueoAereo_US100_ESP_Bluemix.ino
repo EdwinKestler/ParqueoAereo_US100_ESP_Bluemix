@@ -15,6 +15,8 @@
 
 ADC_MODE(ADC_VCC);
 
+const int LEDPIN = 16;
+
 int failed, sent, published; //variables de conteo de envios 
 
 unsigned int HighLen = 0;       //variable para distancia maxima calculada
@@ -58,17 +60,31 @@ String ISO8601;                   //variable Global para almacenar la Fecha del 
 String Latitud = "15.30";         //Variable Global para Configurar la Latitud del nodo
 String Longitud = "-90.15";       //Variable Global para configurar la Longitud del nodo
 
+//---------------------------------- Variables de medicion de parqueo
+int MinDist = 2000;
+
+//------------------se define una na funcion para identificar los mensajes de debugging -------------
+
+#define DEBUGPRINT
+
+#ifdef DEBUGPRINT
+#define DEBUG_PRINT(x)  Serial.println (x)
+#else
+#define DEBUG_PRINT(x)
+#endif
+
+
 //-------- HandleUpdate function receive the data, parse and update the info --------//
 void handleUpdate(byte* payload) { 
   StaticJsonBuffer<1024> jsonBuffer;                          //buffer para almacenar el Json
   JsonObject& root = jsonBuffer.parseObject((char*)payload);  
   if (!root.success()) {                                      
-    Serial.println(F("handleUpdate: payload parse FAILED"));  
+    DEBUG_PRINT (F("handleUpdate: payload parse FAILED"));  
     return;                                                   
   }
-  Serial.println(F("handleUpdate payload:"));                 
+  DEBUG_PRINT(F("handleUpdate payload:"));                 
   root.prettyPrintTo(Serial);                                 
-  Serial.println();                                           
+  DEBUG_PRINT();                                           
   JsonObject& d = root["d"];                                  
   JsonArray& fields = d["fields"];                            
   for (JsonArray::iterator it = fields.begin();              
@@ -82,30 +98,35 @@ void handleUpdate(byte* payload) {
         const char* nodeID = "";
         nodeID = fieldValue["name"];
         NodeID = String(nodeID);
-        Serial.print(F("NodeID:"));
-        Serial.println(NodeID);
+        DEBUG_PRINT(F("NodeID:"));
+        DEBUG_PRINT(NodeID);
       }
       if (fieldValue.containsKey("lat")) {
-        const char* nodeID = "";
-        nodeID = fieldValue["lat"];
-        Latitud = String(nodeID);
-        Serial.print(F("Latitud:"));
-        Serial.println(Latitud);
+        const char* RLatSetting = "";
+        RLatSetting = fieldValue["lat"];
+        Latitud = String(RLatSetting);
+        DEBUG_PRINT(F("Latitud:"));
+        DEBUG_PRINT(Latitud);
       }
       if (fieldValue.containsKey("long")) {
-        const char* nodeID = "";
-        nodeID = fieldValue["long"];
-        Longitud = String(nodeID);
-        Serial.print(F("Longitud:"));
-        Serial.println(Longitud);
+        const char* RLongSetting = "";
+        RLongSetting = fieldValue["long"];
+        Longitud = String(RLongSetting);
+        DEBUG_PRINT(F("Longitud:"));
+        DEBUG_PRINT(Longitud);
+      }
+      if (fieldValue.containsKey("MinDist")) {
+        MinDist = fieldValue["MinDist"];
+        DEBUG_PRINT(F("MinDist:"));
+        DEBUG_PRINT(MinDist);
       }
     }
     if (strcmp (fieldName, "deviceInfo") == 0) {
       JsonObject& fieldValue = field["value"];
       if (fieldValue.containsKey("fwVersion")) {
         FWVERSION = fieldValue["fwVersion"];
-        Serial.print(F("fwVersion:"));
-        Serial.println(FWVERSION);
+        DEBUG_PRINT(F("fwVersion:"));
+        DEBUG_PRINT(FWVERSION);
       }
     }
   }
@@ -114,13 +135,13 @@ void handleUpdate(byte* payload) {
 //-------- Callback function. Receive the payload from MQTT topic and translate it to handle  --------//
 
 void callback(char* topic, byte* payload, unsigned int payloadLength) {
-  Serial.print(F("callback invoked for topic: "));
-  Serial.println(topic);
+  DEBUG_PRINT(F("callback invoked for topic: "));
+  DEBUG_PRINT(topic);
   if (strcmp (responseTopic, topic) == 0) {
     return; // just print of response for now
   }
   if (strcmp (rebootTopic, topic) == 0) {
-    Serial.println(F("Rebooting..."));
+    DEBUG_PRINT(F("Rebooting..."));
     ESP.restart();
   }
   if (strcmp (updateTopic, topic) == 0) {
@@ -135,35 +156,35 @@ PubSubClient client(server, 1883, callback, wifiClient);
 //-------- mqttConnect fuunction. Connect to mqtt Server  --------//
 void mqttConnect() {
   if (!!!client.connected()) {
-    Serial.print(F("Reconnecting MQTT client to "));
-    Serial.println(server);
+    DEBUG_PRINT(F("Reconnecting MQTT client to "));
+    DEBUG_PRINT(server);
     while (!!!client.connect(clientId, authMethod, token)) {
-      Serial.print(F("."));
+      DEBUG_PRINT(F("."));
       delay(500);
     }
-    Serial.println();
+    DEBUG_PRINT();
   }
 }
 
 //-------- initManageDevice function. suscribe topics, Send metadata and supports to bluemix --------//
 void initManagedDevice() {
   if (client.subscribe("iotdm-1/response")) {
-    Serial.println(F("subscribe to responses OK"));
+    DEBUG_PRINT(F("subscribe to responses OK"));
   }
   else {
-    Serial.println(F("subscribe to responses FAILED"));
+   DEBUG_PRINT(F("subscribe to responses FAILED"));
   }
   if (client.subscribe(rebootTopic)) {
-    Serial.println(F("subscribe to reboot OK"));
+    DEBUG_PRINT(F("subscribe to reboot OK"));
   }
   else {
-    Serial.println(F("subscribe to reboot FAILED"));
+    DEBUG_PRINT(F("subscribe to reboot FAILED"));
   }
   if (client.subscribe("iotdm-1/device/update")) {
-    Serial.println(F("subscribe to update OK"));
+    DEBUG_PRINT(F("subscribe to update OK"));
   }
   else {
-    Serial.println(F("subscribe to update FAILED"));
+    DEBUG_PRINT(F("subscribe to update FAILED"));
   }
   
   int a = 0;
@@ -176,10 +197,10 @@ void initManagedDevice() {
     supports["deviceActions"] = true;
     char buff[200];
     root.printTo(buff, sizeof(buff));
-    Serial.println(F("publishing device metadata:"));
-    Serial.println(buff);
+    DEBUG_PRINT(F("publishing device metadata:"));
+    DEBUG_PRINT(buff);
     if (client.publish(manageTopic, buff)) {
-      Serial.println(F("device Publish ok"));
+      DEBUG_PRINT(F("device Publish ok"));
     }
     else {
       Serial.print(F("device Publish failed:"));
@@ -195,12 +216,13 @@ void initManagedDevice() {
     metadata["name"] = NodeID;
     metadata["lat"] = Latitud;
     metadata["long"] = Longitud;
+    metadata["MinDist"] = MinDist;
     char buff[1024];
     root.printTo(buff, sizeof(buff));
-    Serial.println(F("publishing device metadata:"));
-    Serial.println(buff);
+    DEBUG_PRINT(F("publishing device metadata:"));
+    DEBUG_PRINT(buff);
     if (client.publish(manageTopic, buff)) {
-      Serial.println(F("device Publish ok"));
+      DEBUG_PRINT(F("device Publish ok"));
     } else {
       Serial.print(F("device Publish failed:"));
     }
@@ -234,13 +256,13 @@ void sendNTPpacket(IPAddress &address){
 time_t getNtpTime()
 {
   while (Udp.parsePacket() > 0) ; // discard any previously received packets
-  Serial.println(F("Transmit NTP Request"));
+  DEBUG_PRINT(F("Transmit NTP Request"));
   sendNTPpacket(timeServer);
   uint32_t beginWait = millis();
   while (millis() - beginWait < 1500) {
     int size = Udp.parsePacket();
     if (size >= NTP_PACKET_SIZE) {
-      Serial.println(F("Receive NTP Response"));
+      DEBUG_PRINT(F("Receive NTP Response"));
       NTP = true;
       Udp.read(packetBuffer, NTP_PACKET_SIZE);  // read packet into the buffer
       unsigned long secsSince1900;
@@ -252,16 +274,16 @@ time_t getNtpTime()
       return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
     }
   }
-  Serial.println(F("No NTP Response :-("));
+  DEBUG_PRINT(F("No NTP Response :-("));
   return 0; // return 0 if unable to get the time
 }
 
 void udpConnect() {
-  Serial.println(F("Starting UDP"));
+  DEBUG_PRINT(F("Starting UDP"));
   Udp.begin(localPort);
   Serial.print(F("Local port: "));
-  Serial.println(Udp.localPort());
-  Serial.println(F("waiting for sync"));
+  DEBUG_PRINT(Udp.localPort());
+  DEBUG_PRINT(F("waiting for sync"));
   setSyncProvider(getNtpTime);
 }
 
@@ -292,7 +314,7 @@ void ISO8601TimeStampDisplay() {
   }
   ISO8601 += second();
 //  ISO8601 += "-06:00";
-  Serial.println(ISO8601);
+  DEBUG_PRINT(ISO8601);
 }
 
 time_t prevDisplay = 0; // when the digital clock was displayed
@@ -309,7 +331,7 @@ void checkTime () {
 //--------  anager function. Configure the wifi connection if not connect put in mode AP--------//
 void wifimanager() {
   WiFiManager wifiManager;
-  Serial.println(F("empezando"));
+  DEBUG_PRINT(F("empezando"));
   if (!  wifiManager.autoConnect("flatwifi")) {
     if (!wifiManager.startConfigPortal("FlatWifi")) {
       //reset and try again, or maybe put it to deep sleep
@@ -320,33 +342,37 @@ void wifimanager() {
 }
 
 //------------------------------- setup  ---------------------------------------------//
-void setup(){   
+void setup(){ 
+  pinMode(LEDPIN, OUTPUT);
+  digitalWrite(LEDPIN, HIGH);
   //connect RX (Pin 0 of Arduino digital IO) to Echo/Rx (US-100), TX (Pin 1 of Arduino digital IO) to Trig/Tx (US-100) 
   Serial.begin(115200);  //set baudrate as 9600bps.
-  Serial.println(F("initializing Setup"));
+  DEBUG_PRINT(F("initializing Setup"));
   swSer.begin(9600);  //set baudrate as 9600bps.
-  Serial.println(F("Connection to Wifi"));
+  DEBUG_PRINT(F("Connection to Wifi"));
+  
   while (WiFi.status() != WL_CONNECTED) {
     wifimanager();
-    delay(1000);
   }
-  Serial.println(F("Connected to WiFi, Sync NTP time"));
+  DEBUG_PRINT(F("Connected to WiFi, Sync NTP time"));
+  
   while (NTP == false) {
     udpConnect ();
-    delay(500);
   }
-  Serial.println(F("Time Sync, Connecting to mqtt sevrer"));
-  mqttConnect();
-  Serial.println(F("Mqtt Connection Done!, sending Device Data"));
-  initManagedDevice();
-  Serial.println(F("Finalizing Setup"));
   
+  DEBUG_PRINT(F("Time Sync, Connecting to mqtt sevrer"));
+  mqttConnect();
+  DEBUG_PRINT(F("Mqtt Connection Done!, sending Device Data"));
+  initManagedDevice();
+  DEBUG_PRINT(F("Finalizing Setup"));
+  digitalWrite(LEDPIN, LOW);
   delay(100);  
 }
 
 
 void loop(){
   Starttime = millis();
+  
   if (failed >= FAILTRESHOLD){
     failed =0;
     published =0;
@@ -355,18 +381,23 @@ void loop(){
   }
   
   if (Starttime >= NEXTSENDTIME){
-    Serial.println(ReadUS100Sensor());//output the result to serial monitor
+    mqttConnect();
+    digitalWrite(LEDPIN, HIGH);
+    DEBUG_PRINT(ReadUS100Sensor());//output the result to serial monitor
     Estado = ReadUS100Sensor();
     publishData(NodeID, ISO8601, Estado);
-    NEXTSENDTIME = Starttime + 20*1000UL;     
+    NEXTSENDTIME = Starttime + 20*1000UL;
+    digitalWrite(LEDPIN, LOW);     
   }
   
   if (Starttime >= UPDATESENDTIME){
+    mqttConnect();
     String Msg = String ("MSGfailed" + failed); 
-    Serial.println(Msg);
+    DEBUG_PRINT(Msg);
     publishManageData(NodeID, published, failed);
-    UPDATESENDTIME = Starttime + 30*60*1000UL;     
+    UPDATESENDTIME = Starttime + 30*60*1000UL;       
   }
+  
 }
 
 //-------- publishData function. Publish the data to MQTT server, the payload should not be bigger than 45 characters name field and data field counts. --------//
@@ -382,10 +413,10 @@ void publishManageData (String Sid0, int env, int fail){
   metadata["fallidos"] = fail;
   char buff[1024];
   root.printTo(buff, sizeof(buff));
-  Serial.println(F("publishing device metadata:"));
-  Serial.println(buff);
+  DEBUG_PRINT(F("publishing device metadata:"));
+  DEBUG_PRINT(buff);
   if (client.publish(manageTopic, buff)) {
-    Serial.println(F("Manage Publish ok"));
+    DEBUG_PRINT(F("Manage Publish ok"));
      published ++;
      failed = 0; 
   }else {
@@ -409,17 +440,17 @@ boolean publishData(String Sid, String tStamp, String Stado) {
   char payload[100];
   root.printTo(payload, sizeof(payload));
   
-  Serial.println(F("publishing device metadata:"));
-  Serial.println(payload);
+  DEBUG_PRINT(F("publishing device metadata:"));
+  DEBUG_PRINT(payload);
   sent ++;
   if (client.publish(publishTopic, payload, byte(sizeof(payload)))) {
-    Serial.println(F("Publish OK"));
+    DEBUG_PRINT(F("Publish OK"));
     published ++;
     failed = 0; 
     return true;
   }
   else {
-    Serial.println(F("Publish FAILED"));
+    DEBUG_PRINT(F("Publish FAILED"));
     failed ++;    
   }
 }
@@ -433,7 +464,7 @@ String ReadUS100Sensor(){
     HighLen = swSer.read();                   //High byte of distance
     LowLen  = swSer.read();                   //Low byte of distance
     Len_mm  = HighLen*256 + LowLen;             //Calculate the distance
-    if((Len_mm > 1) && (Len_mm < 2000)){ //normal distance should between 1mm and 10000mm (1mm, 1m)
+    if((Len_mm > 1) && (Len_mm < MinDist)){ //normal distance should between 1mm and 10000mm (1mm, 1m)
       estado = "ocupado";
       return estado;
     }else{
